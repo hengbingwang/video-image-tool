@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>视频与图片处理工具</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+  </svg>
+  <h1>视频与图片处理工具</h1>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="videoTab">📷 视频截图</button>
+  <button class="tab-btn" data-tab="stitchTab">🖼️ 图片拼接</button>
+</div>
+
+<!-- ==================== VIDEO TAB ==================== -->
+<div class="tab-panel active" id="videoTab">
+
+  <!-- Upload zone -->
+  <div id="videoUploadZone" class="upload-zone">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <p>点击或拖拽视频文件到此处上传</p>
+    <p>支持 MP4、MOV、AVI、MKV 等格式</p>
+    <input type="file" id="videoFileInput" accept="video/*" class="hidden">
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <label>检测算法</label>
+    <select id="detectorSelect">
+      <option value="content">内容检测</option>
+      <option value="adaptive">自适应检测</option>
+      <option value="threshold">阈值检测</option>
+    </select>
+    <label>阈值</label>
+    <div class="threshold-slider-group">
+      <div class="threshold-slider-wrap">
+        <div id="thresholdBubble" class="threshold-bubble">27</div>
+        <input type="range" id="thresholdInput" min="1" max="100" step="0.5" value="27">
+        <div class="threshold-hints">
+          <span>场景多</span>
+          <span>场景少</span>
+        </div>
+      </div>
+    </div>
+    <label>最短时长 (s)</label>
+    <input type="number" id="minLenInput" value="1" min="0.1" max="60" step="0.1">
+    <button id="detectBtn" class="btn btn-primary" disabled>⚡ 自动检测</button>
+  </div>
+
+  <!-- Main content: left video + right list -->
+  <div id="videoSection" class="split-layout hidden">
+
+    <div class="video-wrapper">
+      <video id="videoPlayer" controls preload="metadata"></video>
+      <div class="capture-bar">
+        <span id="currentTimeDisplay">00:00:00.00</span>
+        <button id="captureBtn" class="btn btn-secondary btn-sm">📷 截取此帧</button>
+      </div>
+    </div>
+
+    <div class="shot-list-panel">
+      <div class="shot-list-header">
+        截图列表 <span id="shotCount" class="badge">0</span>
+      </div>
+      <div class="shot-list" id="shotList"></div>
+      <div class="shot-list-footer">
+        <select id="exportFmtSelect" class="btn btn-outline btn-sm" style="padding:5px;">
+          <option value="jpg">JPG</option>
+          <option value="png">PNG</option>
+        </select>
+        <button id="exportShotsBtn" class="btn btn-outline btn-sm">⬇ 导出 ZIP</button>
+        <button id="sendToStitchBtn" class="btn btn-success btn-sm">→ 发送到拼接</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="videoStatus" class="status-bar">请上传视频文件开始使用</div>
+</div>
+
+<!-- ==================== STITCH TAB ==================== -->
+<div class="tab-panel" id="stitchTab">
+
+  <!-- Upload zone for images -->
+  <div id="stitchUploadZone" class="upload-zone" style="margin-bottom:12px;">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <p>点击或拖拽图片文件到此处（支持多选）</p>
+    <input type="file" id="stitchFileInput" accept="image/*" multiple class="hidden">
+  </div>
+
+  <!-- Image grid -->
+  <div class="img-grid-wrapper">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+      <span style="font-size:0.9rem; color:#555;">图片列表 <span id="imgCount" class="badge">0</span> &nbsp;（拖拽可排序）</span>
+    </div>
+    <div class="img-grid" id="imgGrid">
+      <div class="preview-placeholder" style="width:100%;">暂无图片，请上传或从视频截图发送</div>
+    </div>
+  </div>
+
+  <!-- Params + Preview -->
+  <div class="stitch-layout">
+
+    <div class="params-panel">
+      <h3>拼接参数</h3>
+
+      <div class="param-row">
+        <label>方向</label>
+        <div class="radio-group">
+          <label><input type="radio" name="direction" value="horizontal" checked> 横向</label>
+          <label><input type="radio" name="direction" value="vertical"> 纵向</label>
+        </div>
+      </div>
+
+      <div class="param-row" id="colsRow">
+        <label>列数</label>
+        <input type="number" id="colsInput" value="3" min="1" max="20">
+      </div>
+
+      <div class="param-row" id="rowsRow" style="display:none;">
+        <label>行数</label>
+        <input type="number" id="rowsInput" value="3" min="1" max="20">
+      </div>
+
+      <div class="param-row">
+        <label>行间距 (px)</label>
+        <input type="number" id="rowGapInput" value="10" min="0" max="200">
+      </div>
+
+      <div class="param-row">
+        <label>列间距 (px)</label>
+        <input type="number" id="colGapInput" value="10" min="0" max="200">
+      </div>
+
+      <div class="param-row">
+        <label>背景色</label>
+        <input type="color" id="bgColorInput" value="#ffffff">
+      </div>
+
+      <div class="param-row">
+        <label>格式</label>
+        <select id="stitchFmtSelect">
+          <option value="JPEG">JPG</option>
+          <option value="PNG">PNG</option>
+        </select>
+      </div>
+
+      <div class="param-row">
+        <label>JPG 质量</label>
+        <input type="number" id="qualityInput" value="90" min="1" max="100">
+      </div>
+
+      <button id="previewBtn" class="btn btn-primary" style="width:100%; margin-top:8px;">👁 生成预览</button>
+    </div>
+
+    <div class="preview-panel">
+      <h3>拼接预览</h3>
+      <div class="preview-img-wrap" id="previewImgWrap">
+        <div class="preview-placeholder">点击"生成预览"查看效果</div>
+      </div>
+      <div class="section-actions">
+        <button id="exportStitchBtn" class="btn btn-success">⬇ 导出下载</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="stitchStatus" class="status-bar">请上传图片或从视频截图发送</div>
+</div>
+
+<script src="/static/app.js"></script>
+<script>
+  // Update current time display + auto-highlight screenshot
+  document.getElementById('videoPlayer').addEventListener('timeupdate', function() {
+    const ct = this.currentTime;
+    const h = Math.floor(ct / 3600);
+    const m = Math.floor((ct % 3600) / 60);
+    const sec = (ct % 60).toFixed(2);
+    document.getElementById('currentTimeDisplay').textContent =
+      `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(5,'0')}`;
+
+    // 找当前激活的截图（最后一个 timestamp <= currentTime）
+    const shots = state.video.screenshots;
+    let activeId = null;
+    for (const shot of shots) {
+      if (shot.timestamp <= ct) activeId = shot.id;
+      else break;
+    }
+    if (activeId !== state.video.selectedId) {
+      state.video.selectedId = activeId;
+      document.querySelectorAll('.shot-card').forEach(c => {
+        const isActive = c.closest('[data-id]')?.dataset.id === activeId;
+        c.classList.toggle('selected', isActive);
+        if (isActive) c.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+  });
+
+  // Enable detect button when video is ready
+  document.getElementById('videoPlayer').addEventListener('loadedmetadata', function() {
+    document.getElementById('detectBtn').disabled = false;
+  });
+</script>
+</body>
+</html>
