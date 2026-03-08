@@ -209,6 +209,7 @@ document.getElementById('sendToStitchBtn').addEventListener('click', async () =>
     state.stitch.id = data.stitch_id;
     state.stitch.images = data.images;
     renderImgGrid();
+    updateRecommendedLayout();
     // Switch to stitch tab
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -303,17 +304,39 @@ async function handleImgFiles(files) {
     }
     renderImgGrid();
     setStatus('stitchStatus', `已加载 ${state.stitch.images.length} 张图片`);
-    // Auto-update cols default
-    updateDefaultCols();
+    updateRecommendedLayout();
   } catch (e) {
     setStatus('stitchStatus', `上传失败: ${e.message}`);
   }
 }
 
-function updateDefaultCols() {
-  const n = state.stitch.images.length;
-  const defaultCols = Math.ceil(Math.sqrt(n));
-  document.getElementById('colsInput').value = defaultCols;
+async function updateRecommendedLayout() {
+  const images = state.stitch.images;
+  const n = images.length;
+  if (n === 0) return;
+
+  // Load natural dimensions for all images
+  const dims = await Promise.all(images.map(img => new Promise(resolve => {
+    const el = new Image();
+    el.onload = () => resolve({ w: el.naturalWidth, h: el.naturalHeight });
+    el.onerror = () => resolve({ w: 16, h: 9 });
+    el.src = img.url;
+  })));
+
+  const avgAr = dims.reduce((sum, d) => sum + d.w / d.h, 0) / n;
+  const TARGET_AR = 16 / 9;
+
+  // Horizontal: fix cols → recommended cols to achieve ~16:9 overall
+  const recCols = Math.max(1, Math.min(n, Math.round(Math.sqrt(n * TARGET_AR / avgAr))));
+  // Vertical: fix rows → recommended rows
+  const recRows = Math.max(1, Math.min(n, Math.round(Math.sqrt(n * avgAr / TARGET_AR))));
+
+  document.getElementById('colsInput').value = recCols;
+  document.getElementById('rowsInput').value = recRows;
+
+  const avgArStr = avgAr.toFixed(2);
+  document.getElementById('layoutHint').textContent =
+    `推荐 ${recCols} 列 / ${recRows} 行（${n} 张图，均宽高比 ${avgArStr}）`;
 }
 
 // --- Render image grid with drag & drop ---
