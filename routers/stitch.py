@@ -92,6 +92,18 @@ async def delete_stitch_image(stitch_id: str, img_id: str):
     return {"deleted": img is not None}
 
 
+@router.post("/stitch-clear/{stitch_id}")
+async def clear_stitch_session(stitch_id: str):
+    session = _get_stitch_session(stitch_id)
+    for img in session["images"]:
+        try:
+            os.remove(img["path"])
+        except FileNotFoundError:
+            pass
+    session["images"] = []
+    return {"ok": True}
+
+
 @router.post("/stitch-preview")
 async def stitch_preview(data: dict):
     stitch_id = data.get("stitch_id")

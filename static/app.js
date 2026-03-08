@@ -13,6 +13,15 @@ const state = {
     images: [],        // [{id, filename, url}]
     dragSrcIdx: null,
   },
+  report: {
+    id: null,
+    images: [],        // [{id, filename, url}]
+    dragSrcIdx: null,
+    scene: 'overview',
+    prompt: '',
+    content: '',
+    loading: false,
+  },
 };
 
 // =====================================================
@@ -43,13 +52,15 @@ async function apiFetch(url, opts = {}) {
 // =====================================================
 // Tab switching
 // =====================================================
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
+  document.getElementById(tabId).classList.add('active');
+}
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(btn.dataset.tab).classList.add('active');
-  });
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
 });
 
 // =====================================================
@@ -189,36 +200,72 @@ document.getElementById('exportShotsBtn').addEventListener('click', async () => 
   window.location.href = `/api/export-screenshots/${state.video.id}?fmt=${fmt_val}`;
 });
 
-// --- Send to stitch ---
-document.getElementById('sendToStitchBtn').addEventListener('click', async () => {
+// --- Execute action (stitch / report / both) ---
+document.getElementById('executeActionBtn').addEventListener('click', async () => {
   if (!state.video.id || !state.video.screenshots.length) {
     alert('没有截图可发送');
     return;
   }
-  setStatus('videoStatus', '发送到拼接...', true);
-  try {
-    const res = await apiFetch('/api/receive-screenshots', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        video_id: state.video.id,
-        filenames: state.video.screenshots.map(s => s.filename),
-      }),
-    });
-    const data = await res.json();
-    state.stitch.id = data.stitch_id;
-    state.stitch.images = data.images;
-    renderImgGrid();
-    updateRecommendedLayout();
-    // Switch to stitch tab
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    document.querySelector('[data-tab="stitchTab"]').classList.add('active');
-    document.getElementById('stitchTab').classList.add('active');
-    setStatus('stitchStatus', `已接收 ${data.images.length} 张截图`);
-    setStatus('videoStatus', `已发送 ${data.images.length} 张截图到拼接工具`);
-  } catch (e) {
-    setStatus('videoStatus', `发送失败: ${e.message}`);
+  const doStitch = document.getElementById('doStitchCheck').checked;
+  const doReport = document.getElementById('doReportCheck').checked;
+  if (!doStitch && !doReport) {
+    alert('请至少选择一个操作（图片拼接 或 生成报告）');
+    return;
+  }
+
+  if (doStitch) {
+    setStatus('videoStatus', '发送到拼接...', true);
+    try {
+      const res = await apiFetch('/api/receive-screenshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          video_id: state.video.id,
+          filenames: state.video.screenshots.map(s => s.filename),
+        }),
+      });
+      const data = await res.json();
+      state.stitch.id = data.stitch_id;
+      state.stitch.images = data.images;
+      renderImgGrid();
+      updateRecommendedLayout();
+      setStatus('stitchStatus', `已接收 ${data.images.length} 张截图`);
+      setStatus('videoStatus', `已发送 ${data.images.length} 张截图到拼接工具`);
+      if (!doReport) {
+        switchTab('stitchTab');
+      }
+    } catch (e) {
+      setStatus('videoStatus', `发送失败: ${e.message}`);
+      return;
+    }
+  }
+
+  if (doReport) {
+    // 每次从视频截图执行时强制重置 report session，避免旧图片堆积
+    state.report.id = null;
+    state.report.images = [];
+    setStatus('videoStatus', '发送截图到调研报告...', true);
+    try {
+      const res = await apiFetch('/api/receive-report-screenshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          report_id: null,
+          video_id: state.video.id,
+          filenames: state.video.screenshots.map(s => s.filename),
+        }),
+      });
+      const data = await res.json();
+      state.report.id = data.report_id;
+      state.report.images = data.images;
+      renderReportImgGrid();
+      const stitchHint = doStitch ? '（图片拼接也已完成，可切换至拼接标签查看）' : '';
+      setStatus('reportStatus', `已加载 ${state.report.images.length} 张图片${stitchHint}，请选择场景并生成报告`);
+      setStatus('videoStatus', `已发送 ${data.images.length} 张截图到调研报告`);
+      switchTab('reportTab');
+    } catch (e) {
+      setStatus('videoStatus', `发送到报告失败: ${e.message}`);
+    }
   }
 });
 
@@ -385,6 +432,8 @@ function renderImgGrid() {
 
   const countEl = document.getElementById('imgCount');
   if (countEl) countEl.textContent = state.stitch.images.length;
+  const clearBtn = document.getElementById('clearStitchImgsBtn');
+  if (clearBtn) clearBtn.style.display = state.stitch.images.length ? '' : 'none';
 }
 
 async function deleteStitchImg(id) {
@@ -397,6 +446,21 @@ async function deleteStitchImg(id) {
     setStatus('stitchStatus', `删除失败: ${e.message}`);
   }
 }
+
+// --- Clear all stitch images ---
+document.getElementById('clearStitchImgsBtn').addEventListener('click', async () => {
+  if (!state.stitch.id || !state.stitch.images.length) return;
+  if (!confirm(`确认清空全部 ${state.stitch.images.length} 张图片？`)) return;
+  try {
+    await apiFetch(`/api/stitch-clear/${state.stitch.id}`, { method: 'POST' });
+    state.stitch.id = null;
+    state.stitch.images = [];
+    renderImgGrid();
+    setStatus('stitchStatus', '图片列表已清空');
+  } catch (e) {
+    setStatus('stitchStatus', `清空失败: ${e.message}`);
+  }
+});
 
 // --- Generate preview ---
 document.getElementById('previewBtn').addEventListener('click', async () => {
@@ -495,3 +559,261 @@ document.querySelectorAll('input[name="direction"]').forEach(r => {
 });
 
 setupStitchUpload();
+
+// =====================================================
+// REPORT TAB
+// =====================================================
+
+const SCENE_PROMPTS = {
+  overview: `请分析以下产品截图，输出一份**产品整体分析报告**，使用 Markdown 格式，包含以下章节：
+
+## 产品定位
+## UI 风格
+## 核心功能
+## UX 亮点
+## 改进空间
+
+请结合截图中的具体内容给出详细分析。`,
+
+  ux: `请分析以下产品截图，输出一份**UI/UX 设计评估报告**，使用 Markdown 格式，包含以下章节：
+
+## 视觉设计
+## 交互设计
+## 信息架构
+## 设计亮点
+## 设计问题
+
+请结合截图中的具体内容给出详细分析。`,
+
+  features: `请分析以下产品截图，输出一份**功能清单梳理报告**，使用 Markdown 格式，包含以下章节：
+
+## 功能列表
+（以表格或列表形式列出所有可见功能）
+
+## 功能说明
+（对每个功能进行简要说明）
+
+## 差异化功能
+（特别有亮点或独特的功能）
+
+## 完整性评估
+（与同类产品相比，功能是否完整）
+
+请结合截图中的具体内容给出详细分析。`,
+
+  compare: `请分析以下产品截图，输出一份**竞品横向对比报告**，使用 Markdown 格式，包含以下章节：
+
+## 功能对比矩阵
+（如有多个产品的截图，列出功能对比表格）
+
+## 设计风格对比
+
+## 优劣势分析
+
+## 综合评估
+
+请结合截图中的具体内容给出详细分析。`,
+
+  custom: '',
+};
+
+// --- Report image upload ---
+function setupReportUpload() {
+  const zone = document.getElementById('reportUploadZone');
+  const input = document.getElementById('reportFileInput');
+
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragging'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragging');
+    if (e.dataTransfer.files.length) handleReportImgFiles(Array.from(e.dataTransfer.files));
+  });
+  input.addEventListener('change', () => {
+    if (input.files.length) handleReportImgFiles(Array.from(input.files));
+    input.value = '';
+  });
+}
+
+async function handleReportImgFiles(files) {
+  setStatus('reportStatus', `上传 ${files.length} 张图片...`, true);
+  const fd = new FormData();
+  files.forEach(f => fd.append('files', f));
+
+  const url = state.report.id
+    ? `/api/upload-report-images?report_id=${state.report.id}`
+    : '/api/upload-report-images';
+
+  try {
+    const res = await apiFetch(url, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!state.report.id) {
+      state.report.id = data.report_id;
+      state.report.images = data.images;
+    } else {
+      state.report.images.push(...data.images);
+    }
+    renderReportImgGrid();
+    setStatus('reportStatus', `已加载 ${state.report.images.length} 张图片`);
+  } catch (e) {
+    setStatus('reportStatus', `上传失败: ${e.message}`);
+  }
+}
+
+// --- Render report image grid ---
+function renderReportImgGrid() {
+  const grid = document.getElementById('reportImgGrid');
+  const countEl = document.getElementById('reportImgCount');
+  grid.innerHTML = '';
+  countEl.textContent = state.report.images.length;
+  const clearReportBtn = document.getElementById('clearReportImgsBtn');
+  if (clearReportBtn) clearReportBtn.style.display = state.report.images.length ? '' : 'none';
+
+  if (!state.report.images.length) {
+    grid.innerHTML = '<div class="preview-placeholder" style="width:100%;">暂无图片，请上传或从视频截图发送</div>';
+    return;
+  }
+
+  state.report.images.forEach((img, idx) => {
+    const card = document.createElement('div');
+    card.className = 'img-card';
+    card.draggable = true;
+    card.dataset.idx = idx;
+    card.dataset.id = img.id;
+
+    card.innerHTML = `
+      <img src="${img.url}" alt="${img.filename}" loading="lazy">
+      <div class="img-idx">${idx + 1}</div>
+      <button class="img-del" title="删除" onclick="deleteReportImg('${img.id}')">✕</button>
+    `;
+
+    card.addEventListener('dragstart', e => {
+      state.report.dragSrcIdx = idx;
+      card.classList.add('dragging-card');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging-card'));
+    card.addEventListener('dragover', e => { e.preventDefault(); card.classList.add('drag-over'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const src = state.report.dragSrcIdx;
+      const dst = idx;
+      if (src !== null && src !== dst) {
+        const [moved] = state.report.images.splice(src, 1);
+        state.report.images.splice(dst, 0, moved);
+        state.report.dragSrcIdx = null;
+        renderReportImgGrid();
+      }
+    });
+
+    grid.appendChild(card);
+  });
+}
+
+async function deleteReportImg(id) {
+  if (!state.report.id) return;
+  try {
+    await apiFetch(`/api/report-image/${state.report.id}/${id}`, { method: 'DELETE' });
+    state.report.images = state.report.images.filter(i => i.id !== id);
+    renderReportImgGrid();
+  } catch (e) {
+    setStatus('reportStatus', `删除失败: ${e.message}`);
+  }
+}
+
+// --- Clear all report images ---
+document.getElementById('clearReportImgsBtn').addEventListener('click', async () => {
+  if (!state.report.id || !state.report.images.length) return;
+  if (!confirm(`确认清空全部 ${state.report.images.length} 张图片？`)) return;
+  try {
+    await apiFetch(`/api/report-clear/${state.report.id}`, { method: 'POST' });
+    state.report.id = null;
+    state.report.images = [];
+    renderReportImgGrid();
+    setStatus('reportStatus', '图片列表已清空');
+  } catch (e) {
+    setStatus('reportStatus', `清空失败: ${e.message}`);
+  }
+});
+
+// --- Scene card selection ---
+document.querySelectorAll('.scene-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.scene-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    const scene = card.dataset.scene;
+    state.report.scene = scene;
+    document.getElementById('reportPrompt').value = SCENE_PROMPTS[scene] || '';
+  });
+});
+
+// Initialize prompt with default scene
+document.getElementById('reportPrompt').value = SCENE_PROMPTS['overview'];
+
+// --- Generate report ---
+document.getElementById('generateReportBtn').addEventListener('click', async () => {
+  if (!state.report.id || !state.report.images.length) {
+    alert('请先上传图片或从视频截图发送');
+    return;
+  }
+  const prompt = document.getElementById('reportPrompt').value.trim();
+  if (!prompt) {
+    alert('请输入或选择 Prompt');
+    return;
+  }
+
+  state.report.loading = true;
+  const btn = document.getElementById('generateReportBtn');
+  btn.disabled = true;
+  setStatus('reportStatus', '正在调用 Claude API 生成报告...', true);
+  document.getElementById('reportOutputPanel').style.display = 'none';
+
+  try {
+    const res = await apiFetch('/api/generate-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        report_id: state.report.id,
+        image_ids: state.report.images.map(i => i.id),
+        prompt,
+      }),
+    });
+    const data = await res.json();
+    state.report.content = data.report;
+    state.report.prompt = prompt;
+
+    document.getElementById('reportContent').innerHTML = marked.parse(data.report);
+    document.getElementById('reportOutputPanel').style.display = '';
+    setStatus('reportStatus', '报告生成完成');
+  } catch (e) {
+    setStatus('reportStatus', `生成失败: ${e.message}`);
+  } finally {
+    state.report.loading = false;
+    btn.disabled = false;
+  }
+});
+
+// --- Copy report ---
+document.getElementById('copyReportBtn').addEventListener('click', () => {
+  if (!state.report.content) return;
+  navigator.clipboard.writeText(state.report.content).then(() => {
+    setStatus('reportStatus', '已复制到剪贴板');
+  });
+});
+
+// --- Download report ---
+document.getElementById('downloadReportBtn').addEventListener('click', () => {
+  if (!state.report.content) return;
+  const blob = new Blob([state.report.content], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'report.md';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+setupReportUpload();

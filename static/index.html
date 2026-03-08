@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>视频与图片处理工具</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
 
@@ -18,6 +19,7 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="videoTab">📷 视频截图</button>
   <button class="tab-btn" data-tab="stitchTab">🖼️ 图片拼接</button>
+  <button class="tab-btn" data-tab="reportTab">📊 调研报告</button>
 </div>
 
 <!-- ==================== VIDEO TAB ==================== -->
@@ -80,7 +82,11 @@
           <option value="png">PNG</option>
         </select>
         <button id="exportShotsBtn" class="btn btn-outline btn-sm">⬇ 导出 ZIP</button>
-        <button id="sendToStitchBtn" class="btn btn-success btn-sm">→ 发送到拼接</button>
+      </div>
+      <div class="shot-action-bar">
+        <label class="action-checkbox"><input type="checkbox" id="doStitchCheck" checked> 图片拼接</label>
+        <label class="action-checkbox"><input type="checkbox" id="doReportCheck"> 生成报告</label>
+        <button id="executeActionBtn" class="btn btn-success btn-sm">执行</button>
       </div>
     </div>
 
@@ -106,6 +112,7 @@
   <div class="img-grid-wrapper">
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
       <span style="font-size:0.9rem; color:#555;">图片列表 <span id="imgCount" class="badge">0</span> &nbsp;（拖拽可排序）</span>
+      <button id="clearStitchImgsBtn" class="btn btn-sm btn-danger" style="display:none;">一键清空</button>
     </div>
     <div class="img-grid" id="imgGrid">
       <div class="preview-placeholder" style="width:100%;">暂无图片，请上传或从视频截图发送</div>
@@ -182,6 +189,80 @@
   </div>
 
   <div id="stitchStatus" class="status-bar">请上传图片或从视频截图发送</div>
+</div>
+
+<!-- ==================== REPORT TAB ==================== -->
+<div class="tab-panel" id="reportTab">
+
+  <!-- Upload zone -->
+  <div id="reportUploadZone" class="upload-zone" style="margin-bottom:12px;">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <p>点击或拖拽图片到此处上传（支持多选，或从视频截图发送）</p>
+    <input type="file" id="reportFileInput" accept="image/*" multiple class="hidden">
+  </div>
+
+  <!-- Image grid -->
+  <div class="img-grid-wrapper" id="reportImgGridWrapper">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+      <span style="font-size:0.9rem; color:#555;">图片列表 <span id="reportImgCount" class="badge">0</span> &nbsp;（拖拽可排序）</span>
+      <button id="clearReportImgsBtn" class="btn btn-sm btn-danger" style="display:none;">一键清空</button>
+    </div>
+    <div class="img-grid" id="reportImgGrid">
+      <div class="preview-placeholder" style="width:100%;">暂无图片，请上传或从视频截图发送</div>
+    </div>
+  </div>
+
+  <!-- Scene selector + Prompt -->
+  <div class="report-config-panel">
+    <div class="scene-picker">
+      <div class="scene-card active" data-scene="overview">
+        <div class="scene-card-icon">📊</div>
+        <div class="scene-card-title">产品整体分析</div>
+        <div class="scene-card-desc">定位 · 功能 · UX 亮点</div>
+      </div>
+      <div class="scene-card" data-scene="ux">
+        <div class="scene-card-icon">🎨</div>
+        <div class="scene-card-title">UI/UX 设计评估</div>
+        <div class="scene-card-desc">视觉 · 交互 · 信息架构</div>
+      </div>
+      <div class="scene-card" data-scene="features">
+        <div class="scene-card-icon">📋</div>
+        <div class="scene-card-title">功能清单梳理</div>
+        <div class="scene-card-desc">功能列表 · 差异化分析</div>
+      </div>
+      <div class="scene-card" data-scene="compare">
+        <div class="scene-card-icon">⚔️</div>
+        <div class="scene-card-title">竞品横向对比</div>
+        <div class="scene-card-desc">对比矩阵 · 优劣势</div>
+      </div>
+      <div class="scene-card" data-scene="custom">
+        <div class="scene-card-icon">✏️</div>
+        <div class="scene-card-title">完全自定义</div>
+        <div class="scene-card-desc">自由编写 Prompt</div>
+      </div>
+    </div>
+    <textarea id="reportPrompt" class="report-prompt" rows="7" placeholder="选择场景后自动填充 Prompt，也可直接编辑..."></textarea>
+    <div class="report-config-actions">
+      <button id="generateReportBtn" class="btn btn-primary">🤖 生成报告</button>
+    </div>
+  </div>
+
+  <!-- Output -->
+  <div class="report-output-panel" id="reportOutputPanel" style="display:none;">
+    <div class="report-output-header">
+      <span>报告输出</span>
+      <div class="report-output-actions">
+        <button id="copyReportBtn" class="btn btn-outline btn-sm">📋 复制报告</button>
+        <button id="downloadReportBtn" class="btn btn-outline btn-sm">⬇ 下载 .md</button>
+      </div>
+    </div>
+    <div class="report-content" id="reportContent"></div>
+  </div>
+
+  <div id="reportStatus" class="status-bar">请上传图片或从视频截图发送，然后选择场景生成报告</div>
 </div>
 
 <script src="/static/app.js"></script>
